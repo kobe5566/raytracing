@@ -1,7 +1,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "math-toolkit.h"
+#if defined(OPT1)
+	#include "math-toolkit_loop_unroll.h"
+#else
+	#include "math-toolkit.h"
+#endif
+
 #include "primitives.h"
 #include "raytracing.h"
 #include "idx_stack.h"

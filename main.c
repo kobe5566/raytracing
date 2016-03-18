@@ -64,5 +64,19 @@ int main()
     free(pixels);
     printf("Done!\n");
     printf("Execution time of raytracing() : %lf sec\n", diff_in_second(start, end));
+	FILE *output;
+
+	
+#if defined(OPT1)
+	output = fopen("runtime.txt","a");
+	printf("loop_unroll\n");	
+	fprintf(output,"loopunroll : %lf \n",diff_in_second(start,end));
+#else 
+	output = fopen("runtime.txt","w");
+	printf("orig\n");
+	fprintf(output,"orig : %lf \n",diff_in_second(start,end));
+#endif
+	fclose(output);
+
     return 0;
 }
