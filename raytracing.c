@@ -20,7 +20,7 @@
 #define MAX(a, b) (a > b ? a : b)
 
 #include<pthread.h>
-#define THREADNUM 1
+#define THREADNUM 4
 
 
 
@@ -524,7 +524,7 @@ static void *thread_compute_color(void *args)
 
 
 
-static void MSAA(uint8_t pixels,color background_color,rectangular_node rectangulars,sphere_node spheres,light_node lights ,const viewpoint *view,int width,int height, double *u, double *v, double*w, double *d,int *factor)
+static void MSAA(uint8_t *pixels,double *background_color,rectangular_node rectangulars,sphere_node spheres,light_node lights ,const viewpoint *view,int width,int height, double *u, double *v, double*w, double *d,int *factor)
 {
 
     pthread_t pid[THREADNUM];
@@ -581,7 +581,7 @@ void raytracing(uint8_t *pixels, color background_color,
                 int width, int height)
 {
     point3 u, v, w, d;
-    color object_color = { 0.0, 0.0, 0.0 };
+//    color object_color = { 0.0, 0.0, 0.0 };
 
     /* calculate u, v, w */
     calculateBasisVectors(u, v, w, view);
