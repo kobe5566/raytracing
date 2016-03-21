@@ -2,9 +2,9 @@
 #include <stdlib.h>
 
 #if defined(OPT1)
-	#include "math-toolkit_loop_unroll.h"
+#include "math-toolkit_loop_unroll.h"
 #else
-	#include "math-toolkit.h"
+#include "math-toolkit.h"
 #endif
 
 #include "primitives.h"
@@ -18,6 +18,11 @@
 
 #define SQUARE(x) (x * x)
 #define MAX(a, b) (a > b ? a : b)
+
+#include<pthread.h>
+#define THREADNUM 1
+
+
 
 /* @param t t distance
  * @return 1 means hit, otherwise 0
@@ -130,6 +135,7 @@ static int rayRectangularIntersection(const point3 ray_e,
 
     return 1;
 }
+
 
 static void localColor(color local_color,
                        const color light_color, double diffuse,
@@ -354,9 +360,12 @@ static unsigned int ray_color(const point3 e, double t,
                               const light_node lights,
                               color object_color, int bounces_left)
 {
-    rectangular_node hit_rec = NULL, light_hit_rec = NULL;
-    sphere_node hit_sphere = NULL, light_hit_sphere = NULL;
+    rectangular_node hit_rec = NULL,light_hit_rec = NULL;
+    sphere_node hit_sphere = NULL, light_hit_sphere =NULL;
     double diffuse, specular;
+
+
+
     point3 l, _l, r, rr;
     object_fill fill;
 
@@ -457,6 +466,114 @@ static unsigned int ray_color(const point3 e, double t,
     return 1;
 }
 
+
+
+
+static void *thread_compute_color(void *args)
+{
+
+    const ARGS *arg = (const ARGS*) args;
+    point3 d;
+    idx_stack stk;
+    color object_color = {0.0,0.0,0.0};
+    for(int j = arg->block_start; j<arg->block_end; j+=THREADNUM) {
+        for(int i = 0; i<arg->pack->width; i++) {
+            double r= 0,g=0,b=0;
+            for(int s =0; s<SAMPLES; s++) {
+                idx_stack_init(&stk);
+                rayConstruction(d,arg->pack->u, arg->pack->v, arg->pack->w,
+                                i **(arg->pack->factor)+s/ *(arg->pack->factor),
+								j **(arg->pack->factor)+s% *(arg->pack->factor),							arg->pack->view,
+                                
+				arg->pack->width *(*(arg->pack->factor)),
+				arg->pack->height *(*(arg->pack->factor)));
+                if(ray_color(arg->pack->view->vrp,0.0,d,&stk,arg->pack->rectangulars, arg->pack->spheres,
+                             arg->pack->lights,object_color,MAX_REFLECTION_BOUNCES)) {
+
+
+                    r +=object_color[0];
+                    g+=object_color[1];
+                    b+=object_color[2];
+                } else {
+                    r+=(arg->pack->background_color)[0];
+                    g+=(arg->pack->background_color)[1];
+                    b+=(arg->pack->background_color)[2];
+                }
+
+                (arg->pack->pixels)[i+(j*arg->pack->width)*3+0] = r*255/SAMPLES;
+
+                (arg->pack->pixels)[i+(j*arg->pack->width)*3+1] = g*255/SAMPLES;
+
+                (arg->pack->pixels)[i+(j*arg->pack->width)*3+2] = b*255/SAMPLES;
+
+            }
+
+        }
+
+
+
+    }
+
+	return NULL;
+
+}
+
+
+
+
+
+
+
+static void MSAA(uint8_t pixels,color background_color,rectangular_node rectangulars,sphere_node spheres,light_node lights ,const viewpoint *view,int width,int height, double *u, double *v, double*w, double *d,int *factor)
+{
+
+    pthread_t pid[THREADNUM];
+    ARG_PACK *arg_pack = malloc(sizeof(ARG_PACK)) ;
+
+    ARGS *args[THREADNUM];
+    void *ret;
+
+    arg_pack->pixels = pixels;
+    arg_pack->background_color = background_color;
+    arg_pack->rectangulars = rectangulars;
+    arg_pack->spheres = spheres;
+    arg_pack->lights = lights;
+    arg_pack->view = view;
+    arg_pack->width = width;
+    arg_pack->height = height;
+    arg_pack->u = u;
+    arg_pack->v = v;
+    arg_pack->w = w;
+    arg_pack->factor = factor;
+
+    for(int i = 0; i < THREADNUM; i++) {
+        args[i] = malloc(sizeof(ARGS));
+
+        args[i]->pack = arg_pack;
+        args[i]->block_start = i;
+        args[i]->block_end = height;
+
+    }
+
+    for(int i= 0; i<THREADNUM; i++) {
+        if(pthread_create(&pid[i],NULL,thread_compute_color,args[i])!=0) {
+            printf("thread created fail.\n");
+            exit(1);
+        }
+    }
+    for(int i = 0; i<THREADNUM; i++)
+        pthread_join(pid[i], &ret);
+
+
+
+}
+
+
+
+
+
+
+
 /* @param background_color this is not ambient light */
 void raytracing(uint8_t *pixels, color background_color,
                 rectangular_node rectangulars, sphere_node spheres,
@@ -469,35 +586,43 @@ void raytracing(uint8_t *pixels, color background_color,
     /* calculate u, v, w */
     calculateBasisVectors(u, v, w, view);
 
-    idx_stack stk;
 
-    int factor = sqrt(SAMPLES);
-    for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
-            double r = 0, g = 0, b = 0;
-            /* MSAA */
-            for (int s = 0; s < SAMPLES; s++) {
-                idx_stack_init(&stk);
-                rayConstruction(d, u, v, w,
-                                i * factor + s / factor,
-                                j * factor + s % factor,
-                                view,
-                                width * factor, height * factor);
-                if (ray_color(view->vrp, 0.0, d, &stk, rectangulars, spheres,
-                              lights, object_color,
-                              MAX_REFLECTION_BOUNCES)) {
-                    r += object_color[0];
-                    g += object_color[1];
-                    b += object_color[2];
-                } else {
-                    r += background_color[0];
-                    g += background_color[1];
-                    b += background_color[2];
-                }
-                pixels[((i + (j * width)) * 3) + 0] = r * 255 / SAMPLES;
-                pixels[((i + (j * width)) * 3) + 1] = g * 255 / SAMPLES;
-                pixels[((i + (j * width)) * 3) + 2] = b * 255 / SAMPLES;
-            }
-        }
-    }
+
+//    idx_stack stk;
+
+    int *factor = malloc(sizeof(int));
+    *factor = sqrt(SAMPLES);
+    /*modified by thread to speed up */
+    /*KOBE5566 */
+    MSAA(pixels, background_color,rectangulars, spheres, lights ,view, width, height,u,v,w,d,factor );
+
+
+    /*   for (int j = 0; j < height; j++) {
+           for (int i = 0; i < width; i++) {
+               double r = 0, g = 0, b = 0;
+               // MSAA
+               for (int s = 0; s < SAMPLES; s++) {
+                   idx_stack_init(&stk);
+                   rayConstruction(d, u, v, w,
+                                   i * factor + s / factor,
+                                   j * factor + s % factor,
+                                   view,
+                                   width * factor, height * factor);
+                   if (ray_color(view->vrp, 0.0, d, &stk, rectangulars, spheres,
+                                 lights, object_color,
+                                 MAX_REFLECTION_BOUNCES)) {
+                       r += object_color[0];
+                       g += object_color[1];
+                       b += object_color[2];
+                   } else {
+                       r += background_color[0];
+                       g += background_color[1];
+                       b += background_color[2];
+                   }
+                   pixels[((i + (j * width)) * 3) + 0] = r * 255 / SAMPLES;
+                   pixels[((i + (j * width)) * 3) + 1] = g * 255 / SAMPLES;
+                   pixels[((i + (j * width)) * 3) + 2] = b * 255 / SAMPLES;
+               }
+           }
+       }*/
 }
